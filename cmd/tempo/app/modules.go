@@ -201,6 +201,9 @@ func (t *App) initQuerier() (services.Service, error) {
 	tracesHandler := middleware.Wrap(http.HandlerFunc(t.querier.TraceByIDHandler))
 	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathTraces)), tracesHandler)
 
+	searchExceptionsHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.SearchExceptionsHandler))
+	t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathExceptions)), searchExceptionsHandler)
+
 	if t.cfg.SearchEnabled {
 		searchHandler := t.HTTPAuthMiddleware.Wrap(http.HandlerFunc(t.querier.SearchHandler))
 		t.Server.HTTP.Handle(path.Join(api.PathPrefixQuerier, addHTTPAPIPrefix(&t.cfg, api.PathSearch)), searchHandler)

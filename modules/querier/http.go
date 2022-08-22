@@ -6,11 +6,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-kit/log/level"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/grafana/tempo/pkg/api"
 	"github.com/grafana/tempo/pkg/tempopb"
+	v1_trace "github.com/grafana/tempo/pkg/tempopb/trace/v1"
+	"github.com/grafana/tempo/pkg/util"
+	util_log "github.com/grafana/tempo/pkg/util/log"
+	"github.com/grafana/tempo/tempodb"
 	"github.com/opentracing/opentracing-go"
 	ot_log "github.com/opentracing/opentracing-go/log"
 )
@@ -143,6 +148,87 @@ func (q *Querier) SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	marshaller := &jsonpb.Marshaler{}
 	err := marshaller.Marshal(w, resp)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(api.HeaderContentType, api.HeaderAcceptJSON)
+}
+
+func (q *Querier) SearchExceptionsHandler(w http.ResponseWriter, r *http.Request) {
+	// Enforce the query timeout while querying backends
+	level.Info(util_log.Logger).Log("msg", "exceptions search")
+	ctx, cancel := context.WithDeadline(r.Context(), time.Now().Add(q.cfg.Search.QueryTimeout))
+	defer cancel()
+
+	span, ctx := opentracing.StartSpanFromContext(ctx, "Querier.SearchHandler")
+	defer span.Finish()
+
+	span.SetTag("requestURI", r.RequestURI)
+
+	var searchResp *tempopb.SearchResponse
+	req, err := api.ParseSearchRequest(r)
+	if err != nil {
+		level.Info(util_log.Logger).Log("msg", "bad request")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	span.SetTag("SearchRequest", req.String())
+
+	searchResp, err = q.SearchRecent(ctx, req)
+	if err != nil {
+		level.Info(util_log.Logger).Log("msg", "bad request")
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	level.Info(util_log.Logger).Log("msg", "traces found", len(searchResp.Traces))
+	aggregatedSpans := map[string][]*v1_trace.Span{}
+	resp := tempopb.ExceptionResponse{Exceptions: []*tempopb.Exception{}}
+
+	for _, t := range searchResp.Traces {
+		byteID, _ := util.HexStringToTraceID(t.TraceID)
+
+		level.Info(util_log.Logger).Log("msg", "trace id", t.TraceID, "from", req.Start, "to", req.End)
+		resp, err := q.FindTraceByID(ctx, &tempopb.TraceByIDRequest{
+			TraceID:    byteID,
+			BlockStart: tempodb.BlockIDMin,
+			BlockEnd:   tempodb.BlockIDMax,
+			QueryMode:  "all",
+		}, int64(req.Start), int64(req.End))
+		if err != nil {
+			level.Info(util_log.Logger).Log("msg", "bad request", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		level.Info(util_log.Logger).Log("msg", "batches found", len(resp.Trace.Batches))
+
+		for _, b := range resp.Trace.Batches {
+			for _, ils := range b.InstrumentationLibrarySpans {
+				for _, s := range ils.Spans {
+					for _, e := range s.Events {
+						for _, a := range e.Attributes {
+							if a.Key == "exception.type" {
+								excId := a.Value.GetStringValue()
+								aggregatedSpans[excId] = append(aggregatedSpans[excId], s)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for excType, spans := range aggregatedSpans {
+		exc := &tempopb.Exception{
+			ExceptionId: excType,
+			Spans:       spans,
+		}
+		resp.Exceptions = append(resp.Exceptions, exc)
+	}
+
+	marshaller := &jsonpb.Marshaler{}
+	err = marshaller.Marshal(w, &resp)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

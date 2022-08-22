@@ -1,13 +1,19 @@
-receivers:    
-  jaeger:     
+receivers:
+  otlp:
     protocols:
-      thrift_http:
+      grpc:
+      http:      
 exporters:
+  logging:
+    loglevel: debug
   otlp:
     endpoint: tempo:4317
-    insecure: true
+    tls:
+      insecure: true   
+processors:
+  batch:
 service:
   pipelines:
     traces:
-      receivers: [jaeger]
+      receivers: [otlp]
       exporters: [otlp]

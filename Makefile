@@ -111,7 +111,7 @@ lint:
 .PHONY: docker-component # Not intended to be used directly
 docker-component: check-component exe
 	docker build -t grafana/$(COMPONENT) --build-arg=TARGETARCH=$(GOARCH) -f ./cmd/$(COMPONENT)/Dockerfile .
-	docker tag grafana/$(COMPONENT) $(COMPONENT)
+	docker tag grafana/$(COMPONENT) tempo-local
 
 .PHONY: docker-tempo
 docker-tempo:

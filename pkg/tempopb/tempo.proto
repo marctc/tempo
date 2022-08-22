@@ -132,3 +132,12 @@ message TraceBytes {
   // pre-marshalled Traces
   repeated bytes traces = 1;
 }
+
+message Exception {
+    string exceptionId = 1;
+    repeated tempopb.trace.v1.Span spans = 2;
+}
+
+message ExceptionResponse {
+    repeated Exception exceptions = 1;
+}

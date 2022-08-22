@@ -55,6 +55,7 @@ const (
 	PathSearchTags      = "/api/search/tags"
 	PathSearchTagValues = "/api/search/tag/{tagName}/values"
 	PathEcho            = "/api/echo"
+	PathExceptions      = "/api/exceptions"
 
 	QueryModeKey       = "mode"
 	QueryModeIngesters = "ingesters"
